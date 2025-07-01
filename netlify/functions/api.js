@@ -71,30 +71,44 @@ exports.handler = async (event, context) => {
             await permDoc.loadInfo();
             const permSheet = permDoc.sheetsByIndex[0];
             const permRows = await permSheet.getRows();
-            const permUserHeader = permSheet.headerValues[0];
-            const permAccessHeader = permSheet.headerValues[1];
-
-            const userPermissions = permRows.find(row => String(row.get(permUserHeader) || '').trim() === costCenter);
-            let accessibleCostCenters = [costCenter];
-            if (userPermissions && userPermissions.get(permAccessHeader)) {
-                 const additionalPermissions = userPermissions.get(permAccessHeader).split(',').map(item => item.trim()).filter(Boolean);
-                 accessibleCostCenters = [...new Set([...accessibleCostCenters, ...additionalPermissions])];
-            }
             
+            // === จุดที่แก้ไข: เปลี่ยนตรรกะการอ่านสิทธิ์ทั้งหมด ===
+            const permUserHeader = permSheet.headerValues[0]; // ชื่อหัวคอลัมน์ A (Cost Center หลัก)
+            
+            // 1. ค้นหาแถวของผู้ใช้ที่ล็อกอินเข้ามา
+            const userPermissionRow = permRows.find(row => String(row.get(permUserHeader) || '').trim() === costCenter);
+            
+            // 2. สร้างรายการสิทธิ์ โดยเริ่มจากสิทธิ์ของตัวเอง
+            let accessibleCostCenters = [costCenter];
+
+            // 3. ถ้าเจอแถวของผู้ใช้
+            if (userPermissionRow) {
+                // 4. วนลูปอ่านทุกคอลัมน์ในแถวนั้น (ข้ามคอลัมน์แรกที่เป็นชื่อตัวเอง)
+                for (let i = 1; i < permSheet.headerValues.length; i++) {
+                    const header = permSheet.headerValues[i];
+                    const permissionValue = userPermissionRow.get(header);
+                    
+                    // 5. ถ้าในเซลล์นั้นมีข้อมูล (ไม่เป็นค่าว่าง) ให้เพิ่มเข้าไปในรายการสิทธิ์
+                    if (permissionValue) {
+                        accessibleCostCenters.push(String(permissionValue).trim());
+                    }
+                }
+            }
+            // 6. ทำให้รายการสิทธิ์ไม่มีค่าซ้ำซ้อน
+            accessibleCostCenters = [...new Set(accessibleCostCenters)];
+            // === จบส่วนที่แก้ไขตรรกะการอ่านสิทธิ์ ===
+
             const expenseDoc = new GoogleSpreadsheet(process.env.EXPENSE_SHEET_ID, auth);
             await expenseDoc.loadInfo();
             const expenseSheet = expenseDoc.sheetsByIndex[0];
             
-            // ดึงวันที่อัพเดทจากเซลล์ AB2
             await expenseSheet.loadCells('AB2');
             const updateDateCell = expenseSheet.getCellByA1('AB2');
             const lastUpdate = updateDateCell.formattedValue || 'ไม่ระบุ';
 
-            // ดึงข้อมูลแถวทั้งหมด
             const expenseRows = await expenseSheet.getRows();
             const statusesToFind = ['รอแนบใบเสร็จ', 'รอแนบใบตอบรับ'];
 
-            // === จุดที่แก้ไข: เปลี่ยนวิธีหาหัวข้อให้ยืดหยุ่นมากขึ้น ===
             const expenseCostCenterHeader = expenseSheet.headerValues.find(h => h && h.toLowerCase().replace(/[\s_]/g, '').includes('costcenter'));
             const expenseStatusHeader = expenseSheet.headerValues.find(h => h && h.toLowerCase().replace(/[\s_]/g, '').includes('status'));
 
@@ -110,10 +124,9 @@ exports.handler = async (event, context) => {
                 })
                 .map(row => {
                     const rowObject = row.toObject();
-                    // สร้าง Object ใหม่ที่มีเฉพาะข้อมูลที่จำเป็น เพื่อไม่ให้ข้อมูลที่ไม่ต้องการแสดงผล
                     const cleanObject = {};
                     expenseSheet.headerValues.forEach(header => {
-                        if (header) { // เอาเฉพาะคอลัมน์ที่มีหัวข้อ
+                        if (header) {
                            cleanObject[header] = rowObject[header];
                         }
                     });

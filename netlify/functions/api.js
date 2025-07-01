@@ -53,9 +53,9 @@ exports.handler = async (event, context) => {
             
             // ค้นหาผู้ใช้ (เปรียบเทียบแบบ String เพื่อความแน่นอน)
             const user = rows.find(row => 
-                    row.get('Cost Center')?.trim().toLowerCase() === String(username).trim().toLowerCase() && 
-                    row.get('วันเดือนปี ที่เกิด')?.trim() === String(password).trim()
-                        );
+               String(row.get('Cost Center') || '').trim().toLowerCase() === String(username).trim().toLowerCase() && 
+               String(row.get('วันเดือนปี ที่เกิด') || '').trim() === String(password).trim()
+            );
 
             if (user) {
                 return { statusCode: 200, headers, body: JSON.stringify({ success: true, message: 'Login successful' }) };

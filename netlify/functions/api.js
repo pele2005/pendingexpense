@@ -14,7 +14,8 @@ const getServiceAccountAuth = () => {
         return new JWT({
             email: creds.client_email,
             key: creds.private_key,
-            scopes: ['https://www.googleapis.com/auth/spreadsheets.readonly'],
+            // === จุดที่แก้ไข: เปลี่ยน Scope ให้ครอบคลุมมากขึ้น ===
+            scopes: ['https://www.googleapis.com/auth/spreadsheets'],
         });
     } catch (error) {
         console.error("Failed to parse GOOGLE_SERVICE_ACCOUNT_CREDS_JSON:", error);
@@ -46,22 +47,15 @@ exports.handler = async (event, context) => {
             const sheet = doc.sheetsByIndex[0];
             const rows = await sheet.getRows();
             
-            // ดึงชื่อหัวคอลัมน์จากตำแหน่ง (A=0, B=1)
-            const userHeader = sheet.headerValues[0]; // ชื่อหัวคอลัมน์ A
-            const passHeader = sheet.headerValues[1]; // ชื่อหัวคอลัมน์ B
+            const userHeader = sheet.headerValues[0];
+            const passHeader = sheet.headerValues[1];
 
             const user = rows.find(row => {
-                // อ่านข้อมูลโดยอ้างอิงจากชื่อหัวคอลัมน์ที่ดึงมาตามตำแหน่ง
                 const sheetUser = String(row.get(userHeader) || '').trim();
                 const sheetPass = String(row.get(passHeader) || '').trim();
-
                 const inputUser = String(username).trim();
                 const inputPass = String(password).trim();
-
-                const isUserMatch = sheetUser.toLowerCase() === inputUser.toLowerCase();
-                const isPassMatch = sheetPass === inputPass;
-                
-                return isUserMatch && isPassMatch;
+                return sheetUser.toLowerCase() === inputUser.toLowerCase() && sheetPass === inputPass;
             });
 
             if (user) {
@@ -78,8 +72,8 @@ exports.handler = async (event, context) => {
             await permDoc.loadInfo();
             const permSheet = permDoc.sheetsByIndex[0];
             const permRows = await permSheet.getRows();
-            const permUserHeader = permSheet.headerValues[0]; // คอลัมน์ A
-            const permAccessHeader = permSheet.headerValues[1]; // คอลัมน์ B
+            const permUserHeader = permSheet.headerValues[0];
+            const permAccessHeader = permSheet.headerValues[1];
 
             const userPermissions = permRows.find(row => String(row.get(permUserHeader) || '').trim() === costCenter);
             let accessibleCostCenters = [costCenter];
@@ -91,14 +85,23 @@ exports.handler = async (event, context) => {
             const expenseDoc = new GoogleSpreadsheet(process.env.EXPENSE_SHEET_ID, auth);
             await expenseDoc.loadInfo();
             const expenseSheet = expenseDoc.sheetsByIndex[0];
-            const expenseRows = await expenseSheet.getRows();
+            
+            // ดึงวันที่อัพเดทจากเซลล์ AB2
             await expenseSheet.loadCells('AB2');
             const updateDateCell = expenseSheet.getCellByA1('AB2');
             const lastUpdate = updateDateCell.formattedValue || 'ไม่ระบุ';
+
+            // ดึงข้อมูลแถวทั้งหมด
+            const expenseRows = await expenseSheet.getRows();
             const statusesToFind = ['รอแนบใบเสร็จ', 'รอแนบใบตอบรับ'];
 
-            const expenseCostCenterHeader = expenseSheet.headerValues.find(h => h.toLowerCase().includes('cost center'));
-            const expenseStatusHeader = expenseSheet.headerValues.find(h => h.toLowerCase().includes('status'));
+            // หาชื่อหัวข้อแบบไดนามิก
+            const expenseCostCenterHeader = expenseSheet.headerValues.find(h => h && h.toLowerCase().includes('cost center'));
+            const expenseStatusHeader = expenseSheet.headerValues.find(h => h && h.toLowerCase().includes('status'));
+
+            if (!expenseCostCenterHeader || !expenseStatusHeader) {
+                throw new Error("Could not find 'Cost Center' or 'Status' header in the expense sheet.");
+            }
 
             const filteredData = expenseRows
                 .filter(row => {
@@ -106,7 +109,18 @@ exports.handler = async (event, context) => {
                     const rowStatus = String(row.get(expenseStatusHeader) || '').trim();
                     return accessibleCostCenters.includes(rowCostCenter) && statusesToFind.includes(rowStatus);
                 })
-                .map(row => row.toObject());
+                .map(row => {
+                    const rowObject = row.toObject();
+                    // สร้าง Object ใหม่ที่มีเฉพาะข้อมูลที่จำเป็น เพื่อไม่ให้ข้อมูลที่ไม่ต้องการแสดงผล
+                    const cleanObject = {};
+                    expenseSheet.headerValues.forEach(header => {
+                        if (header) { // เอาเฉพาะคอลัมน์ที่มีหัวข้อ
+                           cleanObject[header] = rowObject[header];
+                        }
+                    });
+                    return cleanObject;
+                });
+
             return { statusCode: 200, headers, body: JSON.stringify({ success: true, data: filteredData, lastUpdate: lastUpdate }) };
         }
 

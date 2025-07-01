@@ -1,16 +1,13 @@
 // ไฟล์นี้จะต้องอยู่ในโฟลเดอร์ netlify/functions/ ภายในโปรเจคของคุณ
-// npm install google-spreadsheet
-
 const { GoogleSpreadsheet } = require('google-spreadsheet');
 const { JWT } = require('google-auth-library');
 
 // --- ข้อมูลสำคัญที่ต้องตั้งค่าใน Environment Variables ของ Netlify ---
-// 1. GOOGLE_SERVICE_ACCOUNT_CREDS_JSON: เนื้อหาทั้งหมดของไฟล์ JSON ที่ได้จาก Google Cloud
-// 2. EXPENSE_SHEET_ID: 1RG-ShsZKfscKYIbMfVKSvV_7YBUvkG7b8MQNK8r_2TM
-// 3. USER_SHEET_ID: 1E-1fKvOG2Yd88RM3WmTAKEzB-Ve1uBuFyDXKGc-ehXY
-// 4. PERMISSION_SHEET_ID: 1LXyGjplIU6WZPF-0Ty10aOO_Dl2Kq_lO7EqdhjtZl80
+// 1. GOOGLE_SERVICE_ACCOUNT_CREDS_JSON
+// 2. EXPENSE_SHEET_ID
+// 3. USER_SHEET_ID
+// 4. PERMISSION_SHEET_ID
 
-// ฟังก์ชันสำหรับสร้าง Service Account Credentials
 const getServiceAccountAuth = () => {
     const creds = JSON.parse(process.env.GOOGLE_SERVICE_ACCOUNT_CREDS_JSON);
     return new JWT({
@@ -20,22 +17,15 @@ const getServiceAccountAuth = () => {
     });
 };
 
-// ฟังก์ชันหลักของ API ที่จะถูกเรียกโดย Netlify
 exports.handler = async (event, context) => {
-    // อนุญาตให้เรียกใช้จากทุกโดเมน (CORS)
     const headers = {
         'Access-Control-Allow-Origin': '*',
         'Access-Control-Allow-Headers': 'Content-Type',
         'Access-Control-Allow-Methods': 'POST, OPTIONS',
     };
     
-    // สำหรับ preflight request ของเบราว์เซอร์
     if (event.httpMethod === 'OPTIONS') {
-        return {
-            statusCode: 200,
-            headers,
-            body: JSON.stringify({ message: 'Successful preflight call.' }),
-        };
+        return { statusCode: 200, headers, body: JSON.stringify({ message: 'Successful preflight call.' }) };
     }
 
     try {
@@ -51,62 +41,69 @@ exports.handler = async (event, context) => {
             const sheet = doc.sheetsByIndex[0];
             const rows = await sheet.getRows();
             
-            // ค้นหาผู้ใช้ (เปรียบเทียบแบบ String เพื่อความแน่นอน)
-            const user = rows.find(row => 
-               String(row.get('Cost Center') || '').trim().toLowerCase() === String(username).trim().toLowerCase() && 
-               String(row.get('วันเดือนปี ที่เกิด') || '').trim() === String(password).trim()
-            );
+            console.log(`[LOGIN ATTEMPT] Received User: '${username}', Received Pass: '${password}'`);
+            console.log("--- STARTING COMPARISON ---");
+
+            const user = rows.find(row => {
+                // ดึงข้อมูลจาก Sheet และแปลงเป็น String พร้อมตัดช่องว่าง
+                const sheetUser = String(row.get('Cost Center') || '').trim();
+                const sheetPass = String(row.get('วันเดือนปี ที่เกิด') || '').trim();
+
+                // ดึงข้อมูลจากที่ผู้ใช้กรอก และแปลงเป็น String พร้อมตัดช่องว่าง
+                const inputUser = String(username).trim();
+                const inputPass = String(password).trim();
+
+                // เปรียบเทียบข้อมูล
+                const isUserMatch = sheetUser.toLowerCase() === inputUser.toLowerCase();
+                const isPassMatch = sheetPass === inputPass;
+
+                // พิมพ์ผลการเปรียบเทียบของทุกแถวออกมาให้เราดู
+                console.log(`[ROW] Sheet: '${sheetUser}' | '${sheetPass}' <==> Input: '${inputUser}' | '${inputPass}' || User Match? ${isUserMatch}, Pass Match? ${isPassMatch}`);
+
+                return isUserMatch && isPassMatch;
+            });
+
+            console.log("--- COMPARISON FINISHED ---");
 
             if (user) {
+                console.log('[RESULT] SUCCESS: Match found!');
                 return { statusCode: 200, headers, body: JSON.stringify({ success: true, message: 'Login successful' }) };
             } else {
+                console.log('[RESULT] FAILED: No match found in any row.');
                 return { statusCode: 401, headers, body: JSON.stringify({ success: false, message: 'Cost Center หรือรหัสผ่านไม่ถูกต้อง' }) };
             }
         }
 
         // --- Action: Get Data ---
         if (action === 'getData') {
+            // ... (ส่วนนี้เหมือนเดิม ไม่ต้องแก้ไข) ...
             const { costCenter } = payload;
-
-            // 1. ดึงข้อมูลสิทธิ์ (Permission)
             const permDoc = new GoogleSpreadsheet(process.env.PERMISSION_SHEET_ID, auth);
             await permDoc.loadInfo();
             const permSheet = permDoc.sheetsByIndex[0];
             const permRows = await permSheet.getRows();
-            const userPermissions = permRows.find(row => row.get('Cost Center')?.trim() === costCenter);
-            
-            let accessibleCostCenters = [costCenter]; // ตัวเองดูได้เสมอ
+            const userPermissions = permRows.find(row => String(row.get('Cost Center')||'').trim() === costCenter);
+            let accessibleCostCenters = [costCenter];
             if (userPermissions && userPermissions.get('ดูข้อมูลของCost Center อื่นได้')) {
                  const additionalPermissions = userPermissions.get('ดูข้อมูลของCost Center อื่นได้').split(',').map(item => item.trim()).filter(Boolean);
-                 accessibleCostCenters = [...new Set([...accessibleCostCenters, ...additionalPermissions])]; // ใช้ Set เพื่อไม่ให้มีค่าซ้ำ
+                 accessibleCostCenters = [...new Set([...accessibleCostCenters, ...additionalPermissions])];
             }
-            
-            // 2. ดึงข้อมูลค่าใช้จ่ายทั้งหมด
             const expenseDoc = new GoogleSpreadsheet(process.env.EXPENSE_SHEET_ID, auth);
             await expenseDoc.loadInfo();
             const expenseSheet = expenseDoc.sheetsByIndex[0];
             const expenseRows = await expenseSheet.getRows();
-            
-            // 3. ดึงวันที่อัพเดทจากเซลล์ AB2
             await expenseSheet.loadCells('AB2');
             const updateDateCell = expenseSheet.getCellByA1('AB2');
             const lastUpdate = updateDateCell.formattedValue || 'ไม่ระบุ';
-
-            // 4. กรองข้อมูลตามเงื่อนไข
             const statusesToFind = ['รอแนบใบเสร็จ', 'รอแนบใบตอบรับ'];
             const filteredData = expenseRows
                 .filter(row => {
-                    const rowCostCenter = row.get('Cost Center')?.trim();
-                    const rowStatus = row.get('Status')?.trim();
+                    const rowCostCenter = String(row.get('Cost Center')||'').trim();
+                    const rowStatus = String(row.get('Status')||'').trim();
                     return accessibleCostCenters.includes(rowCostCenter) && statusesToFind.includes(rowStatus);
                 })
-                .map(row => row.toObject()); // แปลงเป็น Object ธรรมดาเพื่อส่งกลับ
-
-            return {
-                statusCode: 200,
-                headers,
-                body: JSON.stringify({ success: true, data: filteredData, lastUpdate: lastUpdate })
-            };
+                .map(row => row.toObject());
+            return { statusCode: 200, headers, body: JSON.stringify({ success: true, data: filteredData, lastUpdate: lastUpdate }) };
         }
 
         return { statusCode: 400, headers, body: JSON.stringify({ success: false, message: 'Invalid action' }) };

@@ -14,7 +14,6 @@ const getServiceAccountAuth = () => {
         return new JWT({
             email: creds.client_email,
             key: creds.private_key,
-            // === จุดที่แก้ไข: เปลี่ยน Scope ให้ครอบคลุมมากขึ้น ===
             scopes: ['https://www.googleapis.com/auth/spreadsheets'],
         });
     } catch (error) {
@@ -95,9 +94,9 @@ exports.handler = async (event, context) => {
             const expenseRows = await expenseSheet.getRows();
             const statusesToFind = ['รอแนบใบเสร็จ', 'รอแนบใบตอบรับ'];
 
-            // หาชื่อหัวข้อแบบไดนามิก
-            const expenseCostCenterHeader = expenseSheet.headerValues.find(h => h && h.toLowerCase().includes('cost center'));
-            const expenseStatusHeader = expenseSheet.headerValues.find(h => h && h.toLowerCase().includes('status'));
+            // === จุดที่แก้ไข: เปลี่ยนวิธีหาหัวข้อให้ยืดหยุ่นมากขึ้น ===
+            const expenseCostCenterHeader = expenseSheet.headerValues.find(h => h && h.toLowerCase().replace(/[\s_]/g, '').includes('costcenter'));
+            const expenseStatusHeader = expenseSheet.headerValues.find(h => h && h.toLowerCase().replace(/[\s_]/g, '').includes('status'));
 
             if (!expenseCostCenterHeader || !expenseStatusHeader) {
                 throw new Error("Could not find 'Cost Center' or 'Status' header in the expense sheet.");

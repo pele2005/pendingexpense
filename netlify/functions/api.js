@@ -99,8 +99,6 @@ exports.handler = async (event, context) => {
             const lastUpdate = updateDateCell.formattedValue || 'ไม่ระบุ';
 
             const expenseRows = await expenseSheet.getRows();
-            
-            // === จุดที่แก้ไข: เปลี่ยนค่า Status ที่ต้องการค้นหา ===
             const statusesToFind = ['รอแนบใบเสร็จ', 'รอแนบใบตอบขอบคุณ'];
 
             const expenseCostCenterHeader = expenseSheet.headerValues.find(h => h && h.toLowerCase().replace(/[\s_]/g, '').includes('costcenter'));
@@ -110,6 +108,14 @@ exports.handler = async (event, context) => {
                 throw new Error("Could not find 'Cost Center' or 'Status' header in the expense sheet.");
             }
 
+            // === จุดที่แก้ไข: เลือกว่าจะแสดงผลคอลัมน์ไหนบ้าง ===
+            // 1. กำหนดตำแหน่งของคอลัมน์ที่ต้องการ (A=0, B=1, C=2, ...)
+            const columnIndicesToShow = [0, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22]; // A,E,H,I,J,K,L,M,N,O,P,Q,R,S,T,V,W
+            
+            // 2. ดึงชื่อหัวข้อของคอลัมน์เหล่านั้นออกมา
+            const allHeaders = expenseSheet.headerValues;
+            const headersToShow = columnIndicesToShow.map(index => allHeaders[index]).filter(Boolean); // .filter(Boolean) เพื่อตัดค่าที่หาไม่เจอออกไป
+
             const filteredData = expenseRows
                 .filter(row => {
                     const rowCostCenter = String(row.get(expenseCostCenterHeader) || '').trim();
@@ -117,12 +123,10 @@ exports.handler = async (event, context) => {
                     return accessibleCostCenters.includes(rowCostCenter) && statusesToFind.includes(rowStatus);
                 })
                 .map(row => {
-                    const rowObject = row.toObject();
+                    // 3. สร้าง Object ใหม่ที่มีเฉพาะข้อมูลจากคอลัมน์ที่เลือกไว้
                     const cleanObject = {};
-                    expenseSheet.headerValues.forEach(header => {
-                        if (header) {
-                           cleanObject[header] = rowObject[header];
-                        }
+                    headersToShow.forEach(header => {
+                        cleanObject[header] = row.get(header) || ''; // ใช้ || '' เพื่อให้แสดงเป็นค่าว่างแทนที่จะเป็น null
                     });
                     return cleanObject;
                 });

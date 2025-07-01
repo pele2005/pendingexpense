@@ -72,31 +72,23 @@ exports.handler = async (event, context) => {
             const permSheet = permDoc.sheetsByIndex[0];
             const permRows = await permSheet.getRows();
             
-            // === จุดที่แก้ไข: เปลี่ยนตรรกะการอ่านสิทธิ์ทั้งหมด ===
-            const permUserHeader = permSheet.headerValues[0]; // ชื่อหัวคอลัมน์ A (Cost Center หลัก)
+            const permUserHeader = permSheet.headerValues[0]; 
             
-            // 1. ค้นหาแถวของผู้ใช้ที่ล็อกอินเข้ามา
             const userPermissionRow = permRows.find(row => String(row.get(permUserHeader) || '').trim() === costCenter);
             
-            // 2. สร้างรายการสิทธิ์ โดยเริ่มจากสิทธิ์ของตัวเอง
             let accessibleCostCenters = [costCenter];
 
-            // 3. ถ้าเจอแถวของผู้ใช้
             if (userPermissionRow) {
-                // 4. วนลูปอ่านทุกคอลัมน์ในแถวนั้น (ข้ามคอลัมน์แรกที่เป็นชื่อตัวเอง)
                 for (let i = 1; i < permSheet.headerValues.length; i++) {
                     const header = permSheet.headerValues[i];
                     const permissionValue = userPermissionRow.get(header);
                     
-                    // 5. ถ้าในเซลล์นั้นมีข้อมูล (ไม่เป็นค่าว่าง) ให้เพิ่มเข้าไปในรายการสิทธิ์
                     if (permissionValue) {
                         accessibleCostCenters.push(String(permissionValue).trim());
                     }
                 }
             }
-            // 6. ทำให้รายการสิทธิ์ไม่มีค่าซ้ำซ้อน
             accessibleCostCenters = [...new Set(accessibleCostCenters)];
-            // === จบส่วนที่แก้ไขตรรกะการอ่านสิทธิ์ ===
 
             const expenseDoc = new GoogleSpreadsheet(process.env.EXPENSE_SHEET_ID, auth);
             await expenseDoc.loadInfo();
@@ -107,7 +99,9 @@ exports.handler = async (event, context) => {
             const lastUpdate = updateDateCell.formattedValue || 'ไม่ระบุ';
 
             const expenseRows = await expenseSheet.getRows();
-            const statusesToFind = ['รอแนบใบเสร็จ', 'รอแนบใบตอบรับ'];
+            
+            // === จุดที่แก้ไข: เปลี่ยนค่า Status ที่ต้องการค้นหา ===
+            const statusesToFind = ['รอแนบใบเสร็จ', 'รอแนบใบตอบขอบคุณ'];
 
             const expenseCostCenterHeader = expenseSheet.headerValues.find(h => h && h.toLowerCase().replace(/[\s_]/g, '').includes('costcenter'));
             const expenseStatusHeader = expenseSheet.headerValues.find(h => h && h.toLowerCase().replace(/[\s_]/g, '').includes('status'));

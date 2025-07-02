@@ -108,28 +108,54 @@ exports.handler = async (event, context) => {
                 throw new Error("Could not find 'Cost Center' or 'Status' header in the expense sheet.");
             }
 
-            // === จุดที่แก้ไข: เลือกว่าจะแสดงผลคอลัมน์ไหนบ้าง ===
-            // 1. กำหนดตำแหน่งของคอลัมน์ที่ต้องการ (A=0, B=1, C=2, ...)
-            const columnIndicesToShow = [0, 4, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 21, 22]; // A,E,H,I,J,K,L,M,N,O,P,Q,R,S,T,V,W
+            // === จุดที่แก้ไข 1: อัปเดตคอลัมน์ที่จะแสดงผล (ตัด J และ V ออก) ===
+            // ตำแหน่งคอลัมน์: A,E,H,I,K,L,M,N,O,P,Q,R,S,T,W
+            const columnIndicesToShow = [0, 4, 7, 8, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 22];
             
-            // 2. ดึงชื่อหัวข้อของคอลัมน์เหล่านั้นออกมา
             const allHeaders = expenseSheet.headerValues;
-            const headersToShow = columnIndicesToShow.map(index => allHeaders[index]).filter(Boolean); // .filter(Boolean) เพื่อตัดค่าที่หาไม่เจอออกไป
+            const headersToShow = columnIndicesToShow.map(index => allHeaders[index]).filter(Boolean);
 
-            const filteredData = expenseRows
+            let filteredData = expenseRows
                 .filter(row => {
                     const rowCostCenter = String(row.get(expenseCostCenterHeader) || '').trim();
                     const rowStatus = String(row.get(expenseStatusHeader) || '').trim();
                     return accessibleCostCenters.includes(rowCostCenter) && statusesToFind.includes(rowStatus);
                 })
                 .map(row => {
-                    // 3. สร้าง Object ใหม่ที่มีเฉพาะข้อมูลจากคอลัมน์ที่เลือกไว้
                     const cleanObject = {};
                     headersToShow.forEach(header => {
-                        cleanObject[header] = row.get(header) || ''; // ใช้ || '' เพื่อให้แสดงเป็นค่าว่างแทนที่จะเป็น null
+                        cleanObject[header] = row.get(header) || '';
                     });
                     return cleanObject;
                 });
+
+            // === จุดที่แก้ไข 2: เรียงลำดับข้อมูลตามวันที่ในคอลัมน์ A ===
+            const dateHeader = allHeaders[0]; // กำหนดให้คอลัมน์ A (index 0) คือคอลัมน์วันที่
+
+            const parseDate = (dateString) => {
+                if (!dateString || typeof dateString !== 'string') return null;
+                const parts = dateString.split(/[/.-]/); // รองรับวันที่คั่นด้วย / . หรือ -
+                if (parts.length === 3) {
+                    // new Date(year, monthIndex, day) -> DD/MM/YYYY
+                    const day = parseInt(parts[0], 10);
+                    const month = parseInt(parts[1], 10) - 1; // เดือนใน JS เริ่มที่ 0
+                    const year = parseInt(parts[2], 10);
+                    if (!isNaN(day) && !isNaN(month) && !isNaN(year)) {
+                        return new Date(year, month, day);
+                    }
+                }
+                return null;
+            };
+
+            filteredData.sort((a, b) => {
+                const dateA = parseDate(a[dateHeader]);
+                const dateB = parseDate(b[dateHeader]);
+
+                if (!dateA) return 1;  // ย้ายรายการที่ไม่มีวันที่ไปไว้ท้ายๆ
+                if (!dateB) return -1; // ย้ายรายการที่ไม่มีวันที่ไปไว้ท้ายๆ
+
+                return dateA - dateB; // เรียงจากเก่าไปใหม่ (Ascending)
+            });
 
             return { statusCode: 200, headers, body: JSON.stringify({ success: true, data: filteredData, lastUpdate: lastUpdate }) };
         }

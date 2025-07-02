@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ค่าใช้จ่ายรอเคลียร์</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- === จุดที่แก้ไข 1: เพิ่ม Library สำหรับสร้างไฟล์ Excel === -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;700&display=swap" rel="stylesheet">
@@ -12,7 +14,6 @@
         body {
             font-family: 'Sarabun', sans-serif;
         }
-        /* เพิ่มสไตล์สำหรับ Spinner */
         .loader {
             border: 5px solid #f3f3f3;
             border-top: 5px solid #3498db;
@@ -24,6 +25,25 @@
         @keyframes spin {
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
+        }
+
+        /* CSS สำหรับตรึงตาราง (Freeze Panes) */
+        thead th {
+            position: -webkit-sticky; /* For Safari */
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        tbody td:first-child {
+            position: -webkit-sticky; /* For Safari */
+            position: sticky;
+            left: 0;
+            background-color: white; 
+            z-index: 5;
+        }
+        thead th:first-child {
+            left: 0;
+            z-index: 20;
         }
     </style>
 </head>
@@ -42,7 +62,7 @@
                         <input type="text" id="username" name="username" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:shadow-outline" required>
                     </div>
                     <div class="mb-6">
-                        <label for="password" class="block text-gray-700 text-sm font-bold mb-2">รหัสผ่าน (วันเดือนปีเกิด 8 หลัก DDMMYYYY)(ใช้ปี ค.ศ.)</label>
+                        <label for="password" class="block text-gray-700 text-sm font-bold mb-2">รหัสผ่าน (วันเดือนปีเกิด 8 หลัก DDMMYYYY)</label>
                         <input type="password" id="password" name="password" class="shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 mb-3 leading-tight focus:outline-none focus:shadow-outline" required>
                     </div>
                     <div id="login-error" class="text-red-500 text-center text-sm mb-4 hidden"></div>
@@ -50,38 +70,38 @@
                         เข้าสู่ระบบ
                     </button>
                 </form>
-                <!-- === จุดที่เพิ่มเข้ามา === -->
                 <p class="text-center text-xs text-gray-400 mt-6">created by Pele'</p>
-                <!-- === จบส่วนที่เพิ่ม === -->
             </div>
         </div>
 
         <!-- ===== ส่วนแสดงข้อมูล (ซ่อนไว้ตอนแรก) ===== -->
         <div id="data-section" class="hidden">
-             <div class="flex justify-between items-center mb-4 flex-wrap">
+             <div class="flex justify-between items-center mb-4 flex-wrap gap-4">
                 <div>
                     <h1 class="text-3xl font-bold text-gray-800">รายการค่าใช้จ่ายรอเคลียร์</h1>
                     <p id="welcome-message" class="text-gray-600"></p>
                 </div>
-                <button id="logout-button" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline mt-4 md:mt-0">
-                    ออกจากระบบ
-                </button>
+                <!-- === จุดที่แก้ไข 2: เพิ่มปุ่ม Download และจัดกลุ่มปุ่ม === -->
+                <div class="flex gap-2">
+                    <button id="download-button" class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                        Download Excel
+                    </button>
+                    <button id="logout-button" class="bg-red-500 hover:bg-red-700 text-white font-bold py-2 px-4 rounded focus:outline-none focus:shadow-outline">
+                        ออกจากระบบ
+                    </button>
+                </div>
             </div>
             <div id="last-update" class="mb-4 text-sm text-gray-500 bg-blue-100 border-l-4 border-blue-500 p-3 rounded-md"></div>
             
-            <!-- Spinner -->
             <div id="loader" class="flex justify-center items-center my-10">
                 <div class="loader"></div>
             </div>
 
-            <!-- Table -->
-            <div id="data-table-container" class="bg-white rounded-xl shadow-md overflow-x-auto hidden">
+            <div id="data-table-container" class="bg-white rounded-xl shadow-md overflow-auto max-h-[70vh] hidden">
                 <table class="min-w-full divide-y divide-gray-200">
                     <thead class="bg-gray-50">
-                        <!-- หัวตารางจะถูกสร้างโดย JavaScript -->
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
-                        <!-- ข้อมูลจะถูกใส่ที่นี่โดย JavaScript -->
                     </tbody>
                 </table>
                  <div id="no-data" class="text-center py-10 text-gray-500 hidden">
@@ -103,17 +123,17 @@
         const dataTableContainer = document.getElementById('data-table-container');
         const loader = document.getElementById('loader');
         const noDataMessage = document.getElementById('no-data');
-
-        // API Endpoint ของ Netlify Function
         const API_ENDPOINT = '/.netlify/functions/api';
+        
+        // === จุดที่แก้ไข 3: เพิ่มตัวแปรและ DOM Element สำหรับปุ่ม Download ===
+        const downloadButton = document.getElementById('download-button');
+        let currentData = []; // ตัวแปรสำหรับเก็บข้อมูลที่ดึงมาล่าสุด
 
-        // Function: แสดงข้อผิดพลาดตอน Login
         function showLoginError(message) {
             loginError.textContent = message;
             loginError.classList.remove('hidden');
         }
 
-        // Function: จัดการการ Login
         async function handleLogin(event) {
             event.preventDefault();
             const username = loginForm.username.value.trim();
@@ -139,11 +159,9 @@
                 const result = await response.json();
 
                 if (response.ok && result.success) {
-                    // Login สำเร็จ
                     localStorage.setItem('costCenter', username);
                     showDataSection();
                 } else {
-                    // Login ไม่สำเร็จ
                     showLoginError(result.message || 'Username หรือ Password ไม่ถูกต้อง');
                 }
             } catch (error) {
@@ -155,7 +173,6 @@
             }
         }
         
-        // Function: แสดงหน้าข้อมูล
         function showDataSection() {
             loginSection.classList.add('hidden');
             dataSection.classList.remove('hidden');
@@ -164,11 +181,11 @@
             fetchExpenseData(costCenter);
         }
 
-        // Function: ดึงข้อมูลค่าใช้จ่าย
         async function fetchExpenseData(costCenter) {
             loader.style.display = 'flex';
             dataTableContainer.classList.add('hidden');
             noDataMessage.classList.add('hidden');
+            downloadButton.style.display = 'none'; // ซ่อนปุ่มตอนโหลด
 
             try {
                 const response = await fetch(API_ENDPOINT, {
@@ -185,21 +202,30 @@
 
                 if (result.success) {
                     lastUpdateDiv.textContent = `ข้อมูลอัพเดทล่าสุดเมื่อ: ${result.lastUpdate || 'N/A'}`;
-                    populateTable(result.data);
+                    
+                    // === จุดที่แก้ไข 4: เก็บข้อมูลที่ดึงมาใส่ตัวแปร ===
+                    currentData = result.data; 
+                    populateTable(currentData);
+                    
+                    // แสดงปุ่ม Download ถ้ามีข้อมูล
+                    if (currentData.length > 0) {
+                        downloadButton.style.display = 'inline-block';
+                    }
                 } else {
                     lastUpdateDiv.textContent = `ไม่สามารถโหลดข้อมูลได้: ${result.message}`;
+                    currentData = []; // เคลียร์ข้อมูลถ้าโหลดไม่สำเร็จ
                 }
 
             } catch (error) {
                 lastUpdateDiv.textContent = 'เกิดข้อผิดพลาดในการดึงข้อมูล';
                 console.error('Fetch data error:', error);
+                currentData = []; // เคลียร์ข้อมูลถ้าเกิด error
             } finally {
                 loader.style.display = 'none';
                 dataTableContainer.classList.remove('hidden');
             }
         }
 
-        // Function: สร้างตารางแสดงผล
         function populateTable(data) {
             const tableHead = dataTableContainer.querySelector('thead');
             const tableBody = dataTableContainer.querySelector('tbody');
@@ -212,19 +238,17 @@
                 return;
             }
 
-            // สร้าง Header ของตารางจาก Key ของ Object แรก
             const headers = Object.keys(data[0]);
             const headerRow = document.createElement('tr');
             headers.forEach(headerText => {
                 const th = document.createElement('th');
                 th.scope = 'col';
-                th.className = 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider';
+                th.className = 'px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50';
                 th.textContent = headerText;
                 headerRow.appendChild(th);
             });
             tableHead.appendChild(headerRow);
 
-            // สร้าง Row ของข้อมูล
             data.forEach(rowData => {
                 const row = document.createElement('tr');
                 headers.forEach(header => {
@@ -237,19 +261,43 @@
             });
         }
 
-        // Function: จัดการการ Logout
         function handleLogout() {
             localStorage.removeItem('costCenter');
             dataSection.classList.add('hidden');
             loginSection.classList.remove('hidden');
             loginForm.reset();
+            currentData = []; // เคลียร์ข้อมูลเมื่อ Logout
+        }
+        
+        // === จุดที่แก้ไข 5: เพิ่มฟังก์ชันสำหรับ Download Excel ===
+        function handleDownloadExcel() {
+            if (currentData.length === 0) {
+                alert('ไม่มีข้อมูลสำหรับดาวน์โหลด');
+                return;
+            }
+
+            // 1. สร้าง Worksheet จากข้อมูล JSON (currentData)
+            const worksheet = XLSX.utils.json_to_sheet(currentData);
+            
+            // 2. สร้าง Workbook ใหม่
+            const workbook = XLSX.utils.book_new();
+
+            // 3. นำ Worksheet ไปใส่ใน Workbook
+            XLSX.utils.book_append_sheet(workbook, worksheet, 'Data'); // ตั้งชื่อ Sheet ว่า "Data"
+
+            // 4. สร้างและดาวน์โหลดไฟล์ Excel
+            // ตั้งชื่อไฟล์ว่า "khaichai-ror-clear_YYYY-MM-DD.xlsx"
+            const today = new Date();
+            const dateString = today.getFullYear() + '-' + (today.getMonth() + 1).toString().padStart(2, '0') + '-' + today.getDate().toString().padStart(2, '0');
+            XLSX.writeFile(workbook, `khaichai-ror-clear_${dateString}.xlsx`);
         }
 
-        // Event Listeners
+
         loginForm.addEventListener('submit', handleLogin);
         logoutButton.addEventListener('click', handleLogout);
+        // === จุดที่แก้ไข 6: เพิ่ม Event Listener ให้ปุ่ม Download ===
+        downloadButton.addEventListener('click', handleDownloadExcel);
 
-        // ตรวจสอบสถานะ Login เมื่อเปิดหน้าเว็บ
         document.addEventListener('DOMContentLoaded', () => {
             const loggedInUser = localStorage.getItem('costCenter');
             if (loggedInUser) {
